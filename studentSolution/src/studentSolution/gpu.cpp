@@ -136,19 +136,62 @@ void process_user_command(GPUMemory &mem, UserCommand cmd) {
   }
 }
 
-void call_vertex_shader(GPUMemory &mem, DrawCommand cmd) {
-  const auto current_program = mem.programs[mem.activatedProgram];
-
+uint32_t get_vertex_id(GPUMemory &mem, uint32_t invocation) {
   const auto current_vertex_array = mem.vertexArrays[mem.activatedVertexArray];
-  // const InVertex vert = {.attributes = current_vertex_array.vertexAttrib};
 
-  // if (current_program.vertexShader) {
-  //   current_program.vertexShader()
-  // }
+  if (current_vertex_array.indexBufferID == -1)
+    return invocation;
+
+  const auto buf = mem.buffers[current_vertex_array.indexBufferID];
+  const auto buf_idx = invocation + current_vertex_array.indexOffset;
+  switch (current_vertex_array.indexType) {
+  case IndexType::U8:
+    return ((uint8_t *)buf.data)[buf_idx];
+    break;
+  case IndexType::U16:
+    return ((uint16_t *)buf.data)[buf_idx];
+    break;
+  case IndexType::U32:
+  default:
+    return ((uint32_t *)buf.data)[buf_idx];
+    break;
+  }
+}
+
+// void get_vertex_attribs(GPUMemory &mem, uint32_t gl_VertexId) {
+//   Attrib attribs[maxAttribs];
+//   const auto current_vertex_array =
+//   mem.vertexArrays[mem.activatedVertexArray];
+
+//   for (auto attrib : current_vertex_array.vertexAttrib) {
+//     if (attrib.type != AttribType::EMPTY) {
+//       auto buf = mem.buffers[attrib.bufferID];
+//       memcpy(attribs[0],
+//              ((void *)buf.data)[attrib.offset + gl_VertexId * attrib.stride],
+//              attrib.type);
+//     }
+//   }
+// }
+
+void call_vertex_shader(GPUMemory &mem, uint32_t invocation,
+                        ShaderInterface &shader) {
+  const auto current_program = mem.programs[mem.activatedProgram];
+  const auto vertex_shader = current_program.vertexShader;
+
+  if (vertex_shader) {
+    InVertex in = {.gl_VertexID = get_vertex_id(mem, invocation)};
+    OutVertex out = {};
+    vertex_shader(out, in, shader);
+  }
 }
 
 void process_draw(GPUMemory &mem, DrawCommand cmd) {
   // todo
+  ShaderInterface shader = {.uniforms = mem.uniforms,
+                            .textures = mem.textures,
+                            .gl_DrawID = mem.gl_DrawID};
+  for (uint32_t invocation = 0; invocation < cmd.nofVertices; invocation++)
+    call_vertex_shader(mem, invocation, shader);
   mem.gl_DrawID++;
 }
 
