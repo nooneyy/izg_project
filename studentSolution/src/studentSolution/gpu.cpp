@@ -6,8 +6,16 @@
  */
 
 #include "solutionInterface/gpu.hpp"
+#include "glm/ext/vector_uint2.hpp"
 #include <cstdint>
+#include <cstring>
 #include <studentSolution/gpu.hpp>
+
+typedef struct {
+  OutVertex v1;
+  OutVertex v2;
+  OutVertex v3;
+} Primitive;
 
 //! [student_GPU_run]
 void student_GPU_run(GPUMemory &mem, CommandBuffer const &cb) {
@@ -143,46 +151,97 @@ uint32_t get_vertex_id(GPUMemory &mem, uint32_t invocation) {
     return invocation;
 
   const auto buf = mem.buffers[current_vertex_array.indexBufferID];
-  const auto buf_idx = invocation + current_vertex_array.indexOffset;
-  switch (current_vertex_array.indexType) {
-  case IndexType::U8:
-    return ((uint8_t *)buf.data)[buf_idx];
-    break;
-  case IndexType::U16:
-    return ((uint16_t *)buf.data)[buf_idx];
-    break;
-  case IndexType::U32:
-  default:
-    return ((uint32_t *)buf.data)[buf_idx];
-    break;
+  const auto buffer_bytes = (uint8_t *)buf.data;
+  const auto index_size = (uint8_t)(current_vertex_array.indexType);
+
+  uint32_t result = 0;
+  memcpy(&result,
+         buffer_bytes + current_vertex_array.indexOffset +
+             invocation * index_size,
+         index_size);
+  return result;
+}
+
+template <typename T>
+T set_vertex_attrib(const VertexAttrib &attrib, const Buffer &buf,
+                    uint32_t gl_VertexID) {
+  T result;
+  const auto buffer_bytes = (uint8_t *)buf.data;
+  memcpy(&result, buffer_bytes + attrib.offset + (attrib.stride * gl_VertexID),
+         sizeof(T));
+  return result;
+}
+
+void fill_vertex_attribs(GPUMemory &mem, uint32_t gl_VertexID,
+                         Attrib (&attribs)[maxAttribs]) {
+  const auto current_vertex_array = mem.vertexArrays[mem.activatedVertexArray];
+
+  for (unsigned attr_idx = 0; attr_idx < maxAttribs; attr_idx++) {
+    const auto attrib = current_vertex_array.vertexAttrib[attr_idx];
+
+    if (attrib.type == AttribType::EMPTY)
+      continue;
+    const auto buf = mem.buffers[attrib.bufferID];
+
+    switch (attrib.type) {
+    case AttribType::FLOAT:
+      attribs[attr_idx].v1 = set_vertex_attrib<float>(attrib, buf, gl_VertexID);
+      break;
+    case AttribType::VEC2:
+      attribs[attr_idx].v2 =
+          set_vertex_attrib<glm::vec2>(attrib, buf, gl_VertexID);
+      break;
+    case AttribType::VEC3:
+      attribs[attr_idx].v3 =
+          set_vertex_attrib<glm::vec3>(attrib, buf, gl_VertexID);
+      break;
+    case AttribType::VEC4:
+      attribs[attr_idx].v4 =
+          set_vertex_attrib<glm::vec4>(attrib, buf, gl_VertexID);
+      break;
+    case AttribType::UINT:
+      attribs[attr_idx].u1 =
+          set_vertex_attrib<uint32_t>(attrib, buf, gl_VertexID);
+      break;
+    case AttribType::UVEC2:
+      attribs[attr_idx].u2 =
+          set_vertex_attrib<glm::uvec2>(attrib, buf, gl_VertexID);
+      break;
+    case AttribType::UVEC3:
+      attribs[attr_idx].u3 =
+          set_vertex_attrib<glm::uvec3>(attrib, buf, gl_VertexID);
+      break;
+    case AttribType::UVEC4:
+      attribs[attr_idx].u4 =
+          set_vertex_attrib<glm::uvec4>(attrib, buf, gl_VertexID);
+      break;
+    default:
+      break;
+    }
   }
 }
 
-// void get_vertex_attribs(GPUMemory &mem, uint32_t gl_VertexId) {
-//   Attrib attribs[maxAttribs];
-//   const auto current_vertex_array =
-//   mem.vertexArrays[mem.activatedVertexArray];
-
-//   for (auto attrib : current_vertex_array.vertexAttrib) {
-//     if (attrib.type != AttribType::EMPTY) {
-//       auto buf = mem.buffers[attrib.bufferID];
-//       memcpy(attribs[0],
-//              ((void *)buf.data)[attrib.offset + gl_VertexId * attrib.stride],
-//              attrib.type);
-//     }
-//   }
-// }
-
 void call_vertex_shader(GPUMemory &mem, uint32_t invocation,
-                        ShaderInterface &shader) {
+                        ShaderInterface &shader, OutVertex &out) {
   const auto current_program = mem.programs[mem.activatedProgram];
   const auto vertex_shader = current_program.vertexShader;
 
   if (vertex_shader) {
-    InVertex in = {.gl_VertexID = get_vertex_id(mem, invocation)};
-    OutVertex out = {};
+    const auto gl_VertexID = get_vertex_id(mem, invocation);
+    InVertex in = {.attributes = {}, .gl_VertexID = gl_VertexID};
+    fill_vertex_attribs(mem, gl_VertexID, in.attributes);
+
     vertex_shader(out, in, shader);
   }
+}
+
+Primitive primitive_assembly(GPUMemory &mem, uint32_t vertex_idx,
+                             ShaderInterface &shader) {
+  Primitive primitive;
+  call_vertex_shader(mem, vertex_idx, shader, primitive.v1);
+  call_vertex_shader(mem, vertex_idx + 1, shader, primitive.v2);
+  call_vertex_shader(mem, vertex_idx + 2, shader, primitive.v3);
+  return primitive;
 }
 
 void process_draw(GPUMemory &mem, DrawCommand cmd) {
@@ -190,8 +249,9 @@ void process_draw(GPUMemory &mem, DrawCommand cmd) {
   ShaderInterface shader = {.uniforms = mem.uniforms,
                             .textures = mem.textures,
                             .gl_DrawID = mem.gl_DrawID};
-  for (uint32_t invocation = 0; invocation < cmd.nofVertices; invocation++)
-    call_vertex_shader(mem, invocation, shader);
+  for (uint32_t vertex_idx = 0; vertex_idx < cmd.nofVertices; vertex_idx += 3) {
+    Primitive primitive = primitive_assembly(mem, vertex_idx, shader);
+  }
   mem.gl_DrawID++;
 }
 
