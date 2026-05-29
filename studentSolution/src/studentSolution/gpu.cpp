@@ -6,10 +6,9 @@
  */
 
 #include "solutionInterface/gpu.hpp"
-#include "glm/ext/vector_uint2.hpp"
 #include <algorithm>
 #include <array>
-#include <cstdint>
+#include <cmath>
 #include <cstring>
 
 void process_clear_color(GPUMemory &mem, ClearColorCommand cmd);
@@ -271,22 +270,98 @@ void viewport_transform(GPUMemory &mem, Primitive &prim) {
   }
 }
 
+float edge_function(glm::vec4 const &from, glm::vec4 const &to,
+                    glm::vec2 const &point) {
+  return (point.x - from.x) * (to.y - from.y) -
+         (point.y - from.y) * (to.x - from.x);
+}
+
 void rasterize(GPUMemory &mem, Primitive &prim) {
-  const auto selected_framebuffer = &mem.framebuffers[mem.activatedFramebuffer];
+  const auto &selected_framebuffer = mem.framebuffers[mem.activatedFramebuffer];
+  const auto &current_program = mem.programs[mem.activatedProgram];
+  const auto fragment_shader = current_program.fragmentShader;
 
-  const auto width = selected_framebuffer->width;
-  const auto height = selected_framebuffer->height;
+  const auto width = selected_framebuffer.width;
+  const auto height = selected_framebuffer.height;
 
-  const auto vert0_x = prim.vertices[0].gl_Position.x;
-  const auto vert1_x = prim.vertices[1].gl_Position.x;
-  const auto vert2_x = prim.vertices[2].gl_Position.x;
+  if (!fragment_shader || width == 0 || height == 0)
+    return;
 
-  const auto vert0_y = prim.vertices[0].gl_Position.y;
-  const auto vert1_y = prim.vertices[1].gl_Position.y;
-  const auto vert2_y = prim.vertices[2].gl_Position.y;
+  const auto &v0_pos = prim.vertices[0].gl_Position;
+  const auto &v1_pos = prim.vertices[1].gl_Position;
+  const auto &v2_pos = prim.vertices[2].gl_Position;
 
-  const auto [min_x, max_x] = std::minmax({vert0_x, vert1_x, vert2_x});
-  const auto [min_y, max_y] = std::minmax({vert0_y, vert1_y, vert2_y});
+  const auto [min_x, max_x] = std::minmax({v0_pos.x, v1_pos.x, v2_pos.x});
+  const auto [min_y, max_y] = std::minmax({v0_pos.y, v1_pos.y, v2_pos.y});
+
+  const auto min_x_px = std::max(0, static_cast<int>(std::floor(min_x)));
+  const auto max_x_px =
+      std::min(static_cast<int>(width) - 1, static_cast<int>(std::ceil(max_x)));
+
+  const auto min_y_px = std::max(0, static_cast<int>(std::floor(min_y)));
+  const auto max_y_px = std::min(static_cast<int>(height) - 1,
+                                 static_cast<int>(std::ceil(max_y)));
+
+  const auto edge0_step_x = v2_pos.y - v1_pos.y;
+  const auto edge1_step_x = v0_pos.y - v2_pos.y;
+  const auto edge2_step_x = v1_pos.y - v0_pos.y;
+
+  const auto edge0_step_y = v1_pos.x - v2_pos.x;
+  const auto edge1_step_y = v2_pos.x - v0_pos.x;
+  const auto edge2_step_y = v0_pos.x - v1_pos.x;
+
+  const auto area = edge_function(v0_pos, v1_pos, glm::vec2(v2_pos));
+  if (area == 0.0f)
+    return;
+
+  if (mem.backfaceCulling.enabled &&
+      (area < 0.0f) != mem.backfaceCulling.frontFaceIsCounterClockWise)
+    return;
+
+  const glm::vec2 first_sample{static_cast<float>(min_x_px) + 0.5f,
+                               static_cast<float>(min_y_px) + 0.5f};
+
+  auto row_edge0 = edge_function(v1_pos, v2_pos, first_sample);
+  auto row_edge1 = edge_function(v2_pos, v0_pos, first_sample);
+  auto row_edge2 = edge_function(v0_pos, v1_pos, first_sample);
+
+  ShaderInterface shader = {.uniforms = mem.uniforms,
+                            .textures = mem.textures,
+                            .gl_DrawID = mem.gl_DrawID};
+
+  for (int y = min_y_px; y <= max_y_px; y++) {
+    auto pixel_edge0 = row_edge0;
+    auto pixel_edge1 = row_edge1;
+    auto pixel_edge2 = row_edge2;
+
+    for (int x = min_x_px; x <= max_x_px; x++) {
+      const auto is_inside =
+          (pixel_edge0 >= 0.0f && pixel_edge1 >= 0.0f && pixel_edge2 >= 0.0f) ||
+          (pixel_edge0 <= 0.0f && pixel_edge1 <= 0.0f && pixel_edge2 <= 0.0f);
+
+      if (is_inside) {
+        const glm::vec3 lambda{pixel_edge0 / area, pixel_edge1 / area,
+                               pixel_edge2 / area};
+
+        InFragment in_fragment = {};
+        in_fragment.gl_FragCoord = glm::vec4(
+            static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f,
+            lambda.x * v0_pos.z + lambda.y * v1_pos.z + lambda.z * v2_pos.z,
+            1.0f);
+
+        OutFragment out_fragment = {};
+        fragment_shader(out_fragment, in_fragment, shader);
+      }
+
+      pixel_edge0 += edge0_step_x;
+      pixel_edge1 += edge1_step_x;
+      pixel_edge2 += edge2_step_x;
+    }
+
+    row_edge0 += edge0_step_y;
+    row_edge1 += edge1_step_y;
+    row_edge2 += edge2_step_y;
+  }
 };
 
 void process_draw(GPUMemory &mem, DrawCommand cmd) {
@@ -298,6 +373,7 @@ void process_draw(GPUMemory &mem, DrawCommand cmd) {
     Primitive primitive = primitive_assembly(mem, vertex_idx, shader);
     perspective_div(primitive);
     viewport_transform(mem, primitive);
+    rasterize(mem, primitive);
   }
   mem.gl_DrawID++;
 }
