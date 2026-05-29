@@ -37,7 +37,7 @@ void student_GPU_run(GPUMemory &mem, CommandBuffer const &cb) {
 
   mem.gl_DrawID = 0;
 
-  for (auto cmd : cb.commands) {
+  for (const auto &cmd : cb.commands) {
     switch (cmd.type) {
     case CommandType::BIND_FRAMEBUFFER:
       mem.activatedFramebuffer = cmd.data.bindFramebufferCommand.id;
@@ -89,14 +89,14 @@ void student_GPU_run(GPUMemory &mem, CommandBuffer const &cb) {
 //! [student_GPU_run]
 
 void process_clear_color(GPUMemory &mem, ClearColorCommand cmd) {
-  const auto selected_framebuffer = &mem.framebuffers[mem.activatedFramebuffer];
+  const auto &selected_framebuffer = mem.framebuffers[mem.activatedFramebuffer];
 
-  const auto color_image = selected_framebuffer->color;
-  const auto image_data = (uint8_t *)color_image.data;
+  const auto &color_image = selected_framebuffer.color;
+  const auto image_data = static_cast<uint8_t *>(color_image.data);
 
   if (image_data) {
-    const auto value_count = selected_framebuffer->width *
-                             selected_framebuffer->height *
+    const auto value_count = selected_framebuffer.width *
+                             selected_framebuffer.height *
                              color_image.bytesPerPixel;
     const auto channel_count = color_image.channels;
     if (color_image.format == Image::U8) {
@@ -117,28 +117,28 @@ void process_clear_color(GPUMemory &mem, ClearColorCommand cmd) {
 }
 
 void process_clear_depth(GPUMemory &mem, ClearDepthCommand cmd) {
-  const auto selected_framebuffer = &mem.framebuffers[mem.activatedFramebuffer];
+  const auto &selected_framebuffer = mem.framebuffers[mem.activatedFramebuffer];
 
-  const auto depth_image = selected_framebuffer->depth;
-  const auto image_data = (float *)depth_image.data;
+  const auto &depth_image = selected_framebuffer.depth;
+  const auto image_data = static_cast<float *>(depth_image.data);
 
   if (image_data) {
     const auto value_count =
-        selected_framebuffer->width * selected_framebuffer->height;
+        selected_framebuffer.width * selected_framebuffer.height;
     for (unsigned idx = 0; idx < value_count; idx++)
       image_data[idx] = cmd.value;
   }
 }
 
 void process_clear_stencil(GPUMemory &mem, ClearStencilCommand cmd) {
-  const auto selected_framebuffer = &mem.framebuffers[mem.activatedFramebuffer];
+  const auto &selected_framebuffer = mem.framebuffers[mem.activatedFramebuffer];
 
-  const auto depth_image = selected_framebuffer->stencil;
-  const auto image_data = (uint8_t *)depth_image.data;
+  const auto &stencil_image = selected_framebuffer.stencil;
+  const auto image_data = static_cast<uint8_t *>(stencil_image.data);
 
   if (image_data) {
     const auto value_count =
-        selected_framebuffer->width * selected_framebuffer->height;
+        selected_framebuffer.width * selected_framebuffer.height;
     for (unsigned idx = 0; idx < value_count; idx++)
       image_data[idx] = cmd.value;
   }
@@ -151,14 +151,14 @@ void process_user_command(GPUMemory &mem, UserCommand cmd) {
 }
 
 uint32_t get_vertex_id(GPUMemory &mem, uint32_t invocation) {
-  const auto current_vertex_array = mem.vertexArrays[mem.activatedVertexArray];
+  const auto &current_vertex_array = mem.vertexArrays[mem.activatedVertexArray];
 
   if (current_vertex_array.indexBufferID == -1)
     return invocation;
 
-  const auto buf = mem.buffers[current_vertex_array.indexBufferID];
-  const auto buffer_bytes = (uint8_t *)buf.data;
-  const auto index_size = (uint8_t)(current_vertex_array.indexType);
+  const auto &buf = mem.buffers[current_vertex_array.indexBufferID];
+  const auto buffer_bytes = static_cast<const uint8_t *>(buf.data);
+  const auto index_size = static_cast<uint8_t>(current_vertex_array.indexType);
 
   uint32_t result = 0;
   memcpy(&result,
@@ -172,7 +172,7 @@ template <typename T>
 T set_vertex_attrib(const VertexAttrib &attrib, const Buffer &buf,
                     uint32_t gl_VertexID) {
   T result;
-  const auto buffer_bytes = (uint8_t *)buf.data;
+  const auto buffer_bytes = static_cast<const uint8_t *>(buf.data);
   memcpy(&result, buffer_bytes + attrib.offset + (attrib.stride * gl_VertexID),
          sizeof(T));
   return result;
@@ -180,14 +180,14 @@ T set_vertex_attrib(const VertexAttrib &attrib, const Buffer &buf,
 
 void fill_vertex_attribs(GPUMemory &mem, uint32_t gl_VertexID,
                          Attrib (&attribs)[maxAttribs]) {
-  const auto current_vertex_array = mem.vertexArrays[mem.activatedVertexArray];
+  const auto &current_vertex_array = mem.vertexArrays[mem.activatedVertexArray];
 
   for (unsigned attr_idx = 0; attr_idx < maxAttribs; attr_idx++) {
-    const auto attrib = current_vertex_array.vertexAttrib[attr_idx];
+    const auto &attrib = current_vertex_array.vertexAttrib[attr_idx];
 
     if (attrib.type == AttribType::EMPTY)
       continue;
-    const auto buf = mem.buffers[attrib.bufferID];
+    const auto &buf = mem.buffers[attrib.bufferID];
 
     switch (attrib.type) {
     case AttribType::FLOAT:
@@ -229,7 +229,7 @@ void fill_vertex_attribs(GPUMemory &mem, uint32_t gl_VertexID,
 
 void call_vertex_shader(GPUMemory &mem, uint32_t invocation,
                         ShaderInterface &shader, OutVertex &out) {
-  const auto current_program = mem.programs[mem.activatedProgram];
+  const auto &current_program = mem.programs[mem.activatedProgram];
   const auto vertex_shader = current_program.vertexShader;
 
   if (vertex_shader) {
@@ -251,22 +251,21 @@ Primitive primitive_assembly(GPUMemory &mem, uint32_t vertex_idx,
 }
 
 void perspective_div(Primitive &prim) {
-  for (auto vert : prim.vertices) {
-    // const auto w_coord = vert.gl_Position.w;
-    // vert.gl_Position.x /= w_coord;
-    // vert.gl_Position.y /= w_coord;
-    // vert.gl_Position.z /= w_coord;
-    vert.gl_Position /= vert.gl_Position.w;
+  for (auto &vert : prim.vertices) {
+    const auto w = vert.gl_Position.w;
+    vert.gl_Position.x /= w;
+    vert.gl_Position.y /= w;
+    vert.gl_Position.z /= w;
   }
 }
 
 void viewport_transform(GPUMemory &mem, Primitive &prim) {
-  const auto selected_framebuffer = &mem.framebuffers[mem.activatedFramebuffer];
+  const auto &selected_framebuffer = mem.framebuffers[mem.activatedFramebuffer];
 
-  const auto width = selected_framebuffer->width;
-  const auto height = selected_framebuffer->height;
+  const auto width = selected_framebuffer.width;
+  const auto height = selected_framebuffer.height;
 
-  for (auto vert : prim.vertices) {
+  for (auto &vert : prim.vertices) {
     vert.gl_Position.x = (vert.gl_Position.x * 0.5 + 0.5) * width;
     vert.gl_Position.y = (1.0 - (vert.gl_Position.y * 0.5 + 0.5)) * height;
   }
