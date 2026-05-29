@@ -267,7 +267,7 @@ void viewport_transform(GPUMemory &mem, Primitive &prim) {
 
   for (auto &vert : prim.vertices) {
     vert.gl_Position.x = (vert.gl_Position.x * 0.5 + 0.5) * width;
-    vert.gl_Position.y = (1.0 - (vert.gl_Position.y * 0.5 + 0.5)) * height;
+    vert.gl_Position.y = (vert.gl_Position.y * 0.5 + 0.5) * height;
   }
 }
 
