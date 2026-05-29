@@ -7,14 +7,20 @@
 
 #include "solutionInterface/gpu.hpp"
 #include "glm/ext/vector_uint2.hpp"
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
-#include <studentSolution/gpu.hpp>
+
+void process_clear_color(GPUMemory &mem, ClearColorCommand cmd);
+void process_clear_depth(GPUMemory &mem, ClearDepthCommand cmd);
+void process_clear_stencil(GPUMemory &mem, ClearStencilCommand cmd);
+void process_user_command(GPUMemory &mem, UserCommand cmd);
+void process_draw(GPUMemory &mem, DrawCommand cmd);
+void process_subcommand(GPUMemory &mem, SubCommand cmd);
 
 typedef struct {
-  OutVertex v1;
-  OutVertex v2;
-  OutVertex v3;
+  std::array<OutVertex, 3> vertices;
 } Primitive;
 
 //! [student_GPU_run]
@@ -238,11 +244,51 @@ void call_vertex_shader(GPUMemory &mem, uint32_t invocation,
 Primitive primitive_assembly(GPUMemory &mem, uint32_t vertex_idx,
                              ShaderInterface &shader) {
   Primitive primitive;
-  call_vertex_shader(mem, vertex_idx, shader, primitive.v1);
-  call_vertex_shader(mem, vertex_idx + 1, shader, primitive.v2);
-  call_vertex_shader(mem, vertex_idx + 2, shader, primitive.v3);
+  for (unsigned arr_pos = 0; arr_pos < primitive.vertices.size(); arr_pos++)
+    call_vertex_shader(mem, vertex_idx + arr_pos, shader,
+                       primitive.vertices[arr_pos]);
   return primitive;
 }
+
+void perspective_div(Primitive &prim) {
+  for (auto vert : prim.vertices) {
+    // const auto w_coord = vert.gl_Position.w;
+    // vert.gl_Position.x /= w_coord;
+    // vert.gl_Position.y /= w_coord;
+    // vert.gl_Position.z /= w_coord;
+    vert.gl_Position /= vert.gl_Position.w;
+  }
+}
+
+void viewport_transform(GPUMemory &mem, Primitive &prim) {
+  const auto selected_framebuffer = &mem.framebuffers[mem.activatedFramebuffer];
+
+  const auto width = selected_framebuffer->width;
+  const auto height = selected_framebuffer->height;
+
+  for (auto vert : prim.vertices) {
+    vert.gl_Position.x = (vert.gl_Position.x * 0.5 + 0.5) * width;
+    vert.gl_Position.y = (1.0 - (vert.gl_Position.y * 0.5 + 0.5)) * height;
+  }
+}
+
+void rasterize(GPUMemory &mem, Primitive &prim) {
+  const auto selected_framebuffer = &mem.framebuffers[mem.activatedFramebuffer];
+
+  const auto width = selected_framebuffer->width;
+  const auto height = selected_framebuffer->height;
+
+  const auto vert0_x = prim.vertices[0].gl_Position.x;
+  const auto vert1_x = prim.vertices[1].gl_Position.x;
+  const auto vert2_x = prim.vertices[2].gl_Position.x;
+
+  const auto vert0_y = prim.vertices[0].gl_Position.y;
+  const auto vert1_y = prim.vertices[1].gl_Position.y;
+  const auto vert2_y = prim.vertices[2].gl_Position.y;
+
+  const auto [min_x, max_x] = std::minmax({vert0_x, vert1_x, vert2_x});
+  const auto [min_y, max_y] = std::minmax({vert0_y, vert1_y, vert2_y});
+};
 
 void process_draw(GPUMemory &mem, DrawCommand cmd) {
   // todo
@@ -251,6 +297,8 @@ void process_draw(GPUMemory &mem, DrawCommand cmd) {
                             .gl_DrawID = mem.gl_DrawID};
   for (uint32_t vertex_idx = 0; vertex_idx < cmd.nofVertices; vertex_idx += 3) {
     Primitive primitive = primitive_assembly(mem, vertex_idx, shader);
+    perspective_div(primitive);
+    viewport_transform(mem, primitive);
   }
   mem.gl_DrawID++;
 }
