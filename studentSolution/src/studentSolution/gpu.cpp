@@ -276,6 +276,63 @@ float edge_function(glm::vec4 const &from, glm::vec4 const &to,
          (point.y - from.y) * (to.x - from.x);
 }
 
+void interpolate_frag_attribs(InFragment &frag,
+                              const AttribType (&vs2fs)[maxAttribs],
+                              const glm::vec3 &lambda, Primitive &prim) {
+  auto v0 = prim.vertices[0];
+  auto v1 = prim.vertices[1];
+  auto v2 = prim.vertices[2];
+
+  auto persp_lambda_x = lambda.x / v0.gl_Position.w;
+  auto persp_lambda_y = lambda.y / v1.gl_Position.w;
+  auto persp_lambda_z = lambda.z / v2.gl_Position.w;
+
+  const auto divisor = persp_lambda_x + persp_lambda_y + persp_lambda_z;
+
+  persp_lambda_x /= divisor;
+  persp_lambda_y /= divisor;
+  persp_lambda_z /= divisor;
+
+  for (unsigned attr_idx = 0; attr_idx < maxAttribs; attr_idx++) {
+    switch (vs2fs[attr_idx]) {
+    case AttribType::EMPTY:
+      break;
+    case AttribType::UINT:
+    case AttribType::UVEC2:
+    case AttribType::UVEC3:
+    case AttribType::UVEC4:
+      frag.attributes[attr_idx] = v0.attributes[attr_idx];
+      break;
+    case AttribType::FLOAT:
+      frag.attributes[attr_idx].v1 =
+          (persp_lambda_x * v0.attributes[attr_idx].v1) +
+          (persp_lambda_y * v1.attributes[attr_idx].v1) +
+          (persp_lambda_z * v2.attributes[attr_idx].v1);
+      break;
+    case AttribType::VEC2:
+      frag.attributes[attr_idx].v2 =
+          (persp_lambda_x * v0.attributes[attr_idx].v2) +
+          (persp_lambda_y * v1.attributes[attr_idx].v2) +
+          (persp_lambda_z * v2.attributes[attr_idx].v2);
+      break;
+    case AttribType::VEC3:
+      frag.attributes[attr_idx].v3 =
+          (persp_lambda_x * v0.attributes[attr_idx].v3) +
+          (persp_lambda_y * v1.attributes[attr_idx].v3) +
+          (persp_lambda_z * v2.attributes[attr_idx].v3);
+      break;
+    case AttribType::VEC4:
+      frag.attributes[attr_idx].v4 =
+          (persp_lambda_x * v0.attributes[attr_idx].v4) +
+          (persp_lambda_y * v1.attributes[attr_idx].v4) +
+          (persp_lambda_z * v2.attributes[attr_idx].v4);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
 void rasterize(GPUMemory &mem, Primitive &prim) {
   const auto &selected_framebuffer = mem.framebuffers[mem.activatedFramebuffer];
   const auto &current_program = mem.programs[mem.activatedProgram];
@@ -340,14 +397,16 @@ void rasterize(GPUMemory &mem, Primitive &prim) {
           (pixel_edge0 <= 0.0f && pixel_edge1 <= 0.0f && pixel_edge2 <= 0.0f);
 
       if (is_inside) {
-        const glm::vec3 lambda{pixel_edge0 / area, pixel_edge1 / area,
-                               pixel_edge2 / area};
+        const glm::vec3 lambda = {pixel_edge0 / area, pixel_edge1 / area,
+                                  pixel_edge2 / area};
 
         InFragment in_fragment = {};
-        in_fragment.gl_FragCoord = glm::vec4(
+        in_fragment.gl_FragCoord = {
             static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f,
             lambda.x * v0_pos.z + lambda.y * v1_pos.z + lambda.z * v2_pos.z,
-            1.0f);
+            1.0f};
+        interpolate_frag_attribs(in_fragment, current_program.vs2fs, lambda,
+                                 prim);
 
         OutFragment out_fragment = {};
         fragment_shader(out_fragment, in_fragment, shader);
