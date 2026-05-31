@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 void process_clear_color(GPUMemory &mem, ClearColorCommand cmd);
@@ -472,7 +473,7 @@ void write_color_buffer(Image &color_buffer, uint32_t x, uint32_t y,
   for (unsigned channel = 0; channel < color_buffer.channels; channel++) {
     const auto component = color_buffer.channelTypes[channel];
     if (color_buffer.format == Image::U8) {
-      value[channel] = color[component] * UINT8_MAX;
+      value[channel] = std::clamp<float>(color[component], 0, 1) * UINT8_MAX;
     } else {
       reinterpret_cast<float *>(value)[channel] = color[component];
     }
@@ -674,7 +675,6 @@ void rasterize(GPUMemory &mem, Primitive &prim) {
 };
 
 void process_draw(GPUMemory &mem, DrawCommand cmd) {
-  // todo
   ShaderInterface shader = {.uniforms = mem.uniforms,
                             .textures = mem.textures,
                             .gl_DrawID = mem.gl_DrawID};
