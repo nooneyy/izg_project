@@ -60,6 +60,9 @@ void student_GPU_run(GPUMemory &mem, CommandBuffer const &cb) {
     case CommandType::SET_STENCIL_COMMAND:
       mem.stencilSettings = cmd.data.setStencilCommand.settings;
       break;
+    case CommandType::SET_BLENDING_COMMAND:
+      mem.blendingSettings = cmd.data.setBlendingCommand.settings;
+      break;
     case CommandType::SET_DRAW_ID:
       mem.gl_DrawID = cmd.data.setDrawIdCommand.id;
       break;
