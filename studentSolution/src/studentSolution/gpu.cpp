@@ -336,6 +336,247 @@ void interpolate_frag_attribs(InFragment &frag,
   }
 }
 
+bool stencil_func_ret(StencilFunc func, uint8_t value, uint32_t ref_value) {
+  switch (func) {
+  case StencilFunc::NEVER:
+    return false;
+  case StencilFunc::LESS:
+    return value < ref_value;
+  case StencilFunc::LEQUAL:
+    return value <= ref_value;
+  case StencilFunc::GREATER:
+    return value > ref_value;
+  case StencilFunc::GEQUAL:
+    return value >= ref_value;
+  case StencilFunc::EQUAL:
+    return value == ref_value;
+  case StencilFunc::NOTEQUAL:
+    return value != ref_value;
+  case StencilFunc::ALWAYS:
+  default:
+    return true;
+  }
+}
+
+uint8_t get_new_stencil_value(StencilOp op, uint8_t value, uint32_t ref_value) {
+  switch (op) {
+  case StencilOp::KEEP:
+    return value;
+  case StencilOp::ZERO:
+    return 0;
+  case StencilOp::REPLACE:
+    return static_cast<uint8_t>(ref_value);
+  case StencilOp::INCR:
+    return value == UINT8_MAX ? value : value + 1;
+  case StencilOp::INCR_WRAP:
+    return value + 1;
+  case StencilOp::DECR:
+    return value == 0 ? value : value - 1;
+  case StencilOp::DECR_WRAP:
+    return value - 1;
+  case StencilOp::INVERT:
+    return ~value;
+  default:
+    return value;
+  }
+}
+
+bool stencil_test(GPUMemory &mem, InFragment &frag, bool front_facing) {
+  const auto stencil_settings = mem.stencilSettings;
+  auto &stencil_buffer = mem.framebuffers[mem.activatedFramebuffer].stencil;
+
+  if (!stencil_settings.enabled || !stencil_buffer.data)
+    return true;
+
+  const auto px_x = frag.gl_FragCoord.x;
+  const auto px_y = frag.gl_FragCoord.y;
+
+  auto value = static_cast<uint8_t *>(getPixel(stencil_buffer, px_x, px_y));
+
+  if (stencil_func_ret(stencil_settings.func, *value,
+                       stencil_settings.refValue))
+    return true;
+
+  if (!mem.blockWrites.stencil) {
+    const auto sfail = front_facing ? stencil_settings.frontOps.sfail
+                                    : stencil_settings.backOps.sfail;
+
+    *value = get_new_stencil_value(sfail, *value, stencil_settings.refValue);
+  }
+
+  return false;
+}
+
+bool depth_test(GPUMemory &mem, InFragment &frag, bool front_facing) {
+  const auto stencil_settings = mem.stencilSettings;
+  const auto &depth_buffer = mem.framebuffers[mem.activatedFramebuffer].depth;
+
+  if (!depth_buffer.data)
+    return true;
+
+  const auto px_x = frag.gl_FragCoord.x;
+  const auto px_y = frag.gl_FragCoord.y;
+  const auto pixel_depth = frag.gl_FragCoord.z;
+
+  const auto depth_value =
+      *static_cast<const float *>(getPixel(depth_buffer, px_x, px_y));
+
+  if (depth_value > pixel_depth)
+    return true;
+
+  if (!mem.blockWrites.stencil && stencil_settings.enabled) {
+    auto &stencil_buffer = mem.framebuffers[mem.activatedFramebuffer].stencil;
+
+    if (!stencil_buffer.data)
+      return false;
+
+    auto stencil_value =
+        static_cast<uint8_t *>(getPixel(stencil_buffer, px_x, px_y));
+
+    const auto dpfail = front_facing ? stencil_settings.frontOps.dpfail
+                                     : stencil_settings.backOps.dpfail;
+    *stencil_value = get_new_stencil_value(dpfail, *stencil_value,
+                                           stencil_settings.refValue);
+  };
+  return false;
+}
+
+glm::vec4 read_color_buffer(Image &color_buffer, uint32_t x, uint32_t y) {
+  glm::vec4 color = {};
+  auto *pixel = static_cast<uint8_t *>(getPixel(color_buffer, x, y));
+
+  if (color_buffer.format == Image::U8) {
+    for (unsigned channel = 0; channel < color_buffer.channels; channel++) {
+      const auto component = color_buffer.channelTypes[channel];
+      color[component] = *pixel / static_cast<float>(UINT8_MAX);
+      pixel += sizeof(uint8_t);
+    }
+  } else {
+    for (unsigned channel = 0; channel < color_buffer.channels; channel++) {
+      const auto component = color_buffer.channelTypes[channel];
+      color[component] = *reinterpret_cast<float *>(pixel);
+      pixel += sizeof(float);
+    }
+  }
+
+  if (color_buffer.channels < 4)
+    color.w = color.x;
+
+  return color;
+}
+
+void write_color_buffer(Image &color_buffer, uint32_t x, uint32_t y,
+                        glm::vec4 &color) {
+  auto *value = static_cast<uint8_t *>(getPixel(color_buffer, x, y));
+
+  for (unsigned channel = 0; channel < color_buffer.channels; channel++) {
+    const auto component = color_buffer.channelTypes[channel];
+    if (color_buffer.format == Image::U8) {
+      value[channel] = color[component] * UINT8_MAX;
+    } else {
+      reinterpret_cast<float *>(value)[channel] = color[component];
+    }
+  }
+}
+
+glm::vec4 blending_factor(BlendFunc factor, glm::vec4 &src,
+                          glm::vec4 const &dst) {
+  switch (factor) {
+  case BlendFunc::ZERO:
+    return glm::vec4(0);
+  case BlendFunc::SRC_COLOR:
+    return src;
+  case BlendFunc::ONE_MINUS_SRC_COLOR:
+    return glm::vec4(1) - src;
+  case BlendFunc::DST_COLOR:
+    return dst;
+  case BlendFunc::ONE_MINUS_DST_COLOR:
+    return glm::vec4(1) - dst;
+  case BlendFunc::SRC_ALPHA:
+    return glm::vec4(src.a);
+  case BlendFunc::ONE_MINUS_SRC_ALPHA:
+    return glm::vec4(1 - src.a);
+  case BlendFunc::DST_ALPHA:
+    return glm::vec4(dst.a);
+  case BlendFunc::ONE_MINUS_DST_ALPHA:
+    return glm::vec4(1 - dst.a);
+  case BlendFunc::ONE:
+  default:
+    return glm::vec4(1);
+  }
+}
+
+glm::vec4 color_blending(BlendingSettings &settings, glm::vec4 &src,
+                         glm::vec4 const &dst) {
+  const auto src_factor = src * blending_factor(settings.sFactor, src, dst);
+  const auto dst_factor = dst * blending_factor(settings.dFactor, src, dst);
+
+  switch (settings.equation) {
+  case BlendEquation::SUBTRACT:
+    return src_factor - dst_factor;
+  case BlendEquation::REVERSE_SUBTRACT:
+    return dst_factor - src_factor;
+  case BlendEquation::MIN:
+    return glm::min(src, dst);
+  case BlendEquation::MAX:
+    return glm::max(src, dst);
+  case BlendEquation::ADD:
+  default:
+    return src_factor + dst_factor;
+  }
+}
+
+void handle_color_buffer(GPUMemory &mem, float px_x, float px_y,
+                         OutFragment &out_frag) {
+  if (mem.blockWrites.color)
+    return;
+
+  auto &color_buffer = mem.framebuffers[mem.activatedFramebuffer].color;
+  if (!color_buffer.data)
+    return;
+
+  auto color = out_frag.gl_FragColor;
+  const auto dst = read_color_buffer(color_buffer, px_x, px_y);
+  if (mem.blendingSettings.enabled)
+    color = color_blending(mem.blendingSettings, color, dst);
+
+  write_color_buffer(color_buffer, px_x, px_y, color);
+}
+
+void late_per_fragment(GPUMemory &mem, InFragment &in_frag,
+                       OutFragment &out_frag, bool front_facing) {
+  if (out_frag.discard)
+    return;
+
+  const auto px_x = in_frag.gl_FragCoord.x;
+  const auto px_y = in_frag.gl_FragCoord.y;
+  const auto px_depth = in_frag.gl_FragCoord.z;
+
+  const auto stencil_settings = mem.stencilSettings;
+  auto &stencil_buffer = mem.framebuffers[mem.activatedFramebuffer].stencil;
+
+  if (stencil_settings.enabled && stencil_buffer.data &&
+      !mem.blockWrites.stencil) {
+    auto stencil_value =
+        static_cast<uint8_t *>(getPixel(stencil_buffer, px_x, px_y));
+
+    const auto dppass = front_facing ? stencil_settings.frontOps.dppass
+                                     : stencil_settings.backOps.dppass;
+
+    *stencil_value = get_new_stencil_value(dppass, *stencil_value,
+                                           stencil_settings.refValue);
+  }
+
+  auto &depth_buffer = mem.framebuffers[mem.activatedFramebuffer].depth;
+
+  if (depth_buffer.data && !mem.blockWrites.depth) {
+    auto depth_value = static_cast<float *>(getPixel(depth_buffer, px_x, px_y));
+    *depth_value = px_depth;
+  }
+
+  handle_color_buffer(mem, px_x, px_y, out_frag);
+}
+
 void rasterize(GPUMemory &mem, Primitive &prim) {
   const auto &selected_framebuffer = mem.framebuffers[mem.activatedFramebuffer];
   const auto &current_program = mem.programs[mem.activatedProgram];
@@ -374,8 +615,10 @@ void rasterize(GPUMemory &mem, Primitive &prim) {
   if (area == 0.0f)
     return;
 
-  if (mem.backfaceCulling.enabled &&
-      (area < 0.0f) != mem.backfaceCulling.frontFaceIsCounterClockWise)
+  const auto front_facing =
+      (area < 0.0f) == mem.backfaceCulling.frontFaceIsCounterClockWise;
+
+  if (mem.backfaceCulling.enabled && !front_facing)
     return;
 
   const glm::vec2 first_sample{static_cast<float>(min_x_px) + 0.5f,
@@ -396,8 +639,8 @@ void rasterize(GPUMemory &mem, Primitive &prim) {
 
     for (int x = min_x_px; x <= max_x_px; x++) {
       const auto is_inside =
-          (pixel_edge0 >= 0.0f && pixel_edge1 >= 0.0f && pixel_edge2 >= 0.0f) ||
-          (pixel_edge0 <= 0.0f && pixel_edge1 <= 0.0f && pixel_edge2 <= 0.0f);
+          (pixel_edge0 > 0.0f && pixel_edge1 > 0.0f && pixel_edge2 > 0.0f) ||
+          (pixel_edge0 < 0.0f && pixel_edge1 < 0.0f && pixel_edge2 < 0.0f);
 
       if (is_inside) {
         const glm::vec3 lambda = {pixel_edge0 / area, pixel_edge1 / area,
@@ -408,18 +651,22 @@ void rasterize(GPUMemory &mem, Primitive &prim) {
             static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f,
             lambda.x * v0_pos.z + lambda.y * v1_pos.z + lambda.z * v2_pos.z,
             1.0f};
-        interpolate_frag_attribs(in_fragment, current_program.vs2fs, lambda,
-                                 prim);
 
-        OutFragment out_fragment = {};
-        fragment_shader(out_fragment, in_fragment, shader);
+        if (stencil_test(mem, in_fragment, front_facing) &&
+            depth_test(mem, in_fragment, front_facing)) {
+          interpolate_frag_attribs(in_fragment, current_program.vs2fs, lambda,
+                                   prim);
+
+          OutFragment out_fragment = {};
+          fragment_shader(out_fragment, in_fragment, shader);
+          late_per_fragment(mem, in_fragment, out_fragment, front_facing);
+        }
       }
 
       pixel_edge0 += edge0_step_x;
       pixel_edge1 += edge1_step_x;
       pixel_edge2 += edge2_step_x;
     }
-
     row_edge0 += edge0_step_y;
     row_edge1 += edge1_step_y;
     row_edge2 += edge2_step_y;
