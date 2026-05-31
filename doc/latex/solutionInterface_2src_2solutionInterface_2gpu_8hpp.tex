@@ -421,7 +421,7 @@ Source and destination colors are weighted using souce and destination factors.
 The resulting color is computed according to equation\+: $ ResultColor = eq(fragFactor \cdot FragmentColor, frameFactor \cdot FrameColor) $, where \texorpdfstring{$\ast$}{*}\+Factor is selected using this enum.~\newline
 
 
-Source color, $ Frag=(Frag_r,Frag_g,Frag_b,Frag_a), $ is the color of fragment produced by fragment shader. Destination color, $ Frame=(Frame_r,Frame_g,Frame_b,Frame_a)$, is the color stored in framebuffer.
+Source color, $ Frag=(Frag_r,Frag_g,Frag_b,Frag_a), $ is the color of fragment produced by fragment shader. Destination color, $ Frame=(Frame_r,Frame_g,Frame_b,Frame_a)$, is the color stored in framebuffer. If the framebuffer has less channels, default values of each component is RGBA = (0,0,0,1).
 
 It follows the \href{https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBlendFunc.xhtml}{\texttt{ Open\+GL}} specification. \mbox{[}Blend\+Func\mbox{]} \begin{DoxyEnumFields}{Enumerator}
 \raisebox{\heightof{T}}[0pt][0pt]{\index{ZERO@{ZERO}!gpu.hpp@{gpu.hpp}}\index{gpu.hpp@{gpu.hpp}!ZERO@{ZERO}}}\Hypertarget{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36fa529e9e0beb5f85d1f132917c1a09860c}\label{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36fa529e9e0beb5f85d1f132917c1a09860c} 
@@ -441,11 +441,11 @@ ONE\+\_\+\+MINUS\+\_\+\+SRC\+\_\+\+COLOR&factor is $ (1,1,1,1) - (Frag_r,Frag_g,
 \hline
 
 \raisebox{\heightof{T}}[0pt][0pt]{\index{DST\_COLOR@{DST\_COLOR}!gpu.hpp@{gpu.hpp}}\index{gpu.hpp@{gpu.hpp}!DST\_COLOR@{DST\_COLOR}}}\Hypertarget{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36fa220e8b21c17d3d0f297244647d60df59}\label{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36fa220e8b21c17d3d0f297244647d60df59} 
-DST\+\_\+\+COLOR&factor is $ (Frame_r,Frame_g,Frame_b,Frame_a)$ \\
+DST\+\_\+\+COLOR&factor is $ (Frame_r,Frame_g,Frame_b,Frame_a)$, if frame has less than 4 channels, the default values of Frame is (0,0,0,1) \\
 \hline
 
 \raisebox{\heightof{T}}[0pt][0pt]{\index{ONE\_MINUS\_DST\_COLOR@{ONE\_MINUS\_DST\_COLOR}!gpu.hpp@{gpu.hpp}}\index{gpu.hpp@{gpu.hpp}!ONE\_MINUS\_DST\_COLOR@{ONE\_MINUS\_DST\_COLOR}}}\Hypertarget{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36face05af0f4690600250a4f0dce0029906}\label{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36face05af0f4690600250a4f0dce0029906} 
-ONE\+\_\+\+MINUS\+\_\+\+DST\+\_\+\+COLOR&factor is $ (1,1,1,1) - (Frame_r,Frame_g,Frame_b,Frame_a)$ \\
+ONE\+\_\+\+MINUS\+\_\+\+DST\+\_\+\+COLOR&factor is $ (1,1,1,1) - (Frame_r,Frame_g,Frame_b,Frame_a)$, if frame has less than 4 channel, the default values of Frame is (0,0,0,1) \\
 \hline
 
 \raisebox{\heightof{T}}[0pt][0pt]{\index{SRC\_ALPHA@{SRC\_ALPHA}!gpu.hpp@{gpu.hpp}}\index{gpu.hpp@{gpu.hpp}!SRC\_ALPHA@{SRC\_ALPHA}}}\Hypertarget{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36faa01be6519d4fb614f16261a59958bbb4}\label{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36faa01be6519d4fb614f16261a59958bbb4} 
@@ -457,11 +457,11 @@ ONE\+\_\+\+MINUS\+\_\+\+SRC\+\_\+\+ALPHA&factor is $ (1,1,1,1) - (Frag_a,Frag_a,
 \hline
 
 \raisebox{\heightof{T}}[0pt][0pt]{\index{DST\_ALPHA@{DST\_ALPHA}!gpu.hpp@{gpu.hpp}}\index{gpu.hpp@{gpu.hpp}!DST\_ALPHA@{DST\_ALPHA}}}\Hypertarget{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36fa59b7e4d8d77a6fc488bfad5dfb160ecc}\label{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36fa59b7e4d8d77a6fc488bfad5dfb160ecc} 
-DST\+\_\+\+ALPHA&factor is $ (Frame_a,Frame_a,Frame_a,Frame_a)$ \\
+DST\+\_\+\+ALPHA&factor is $ (Frame_a,Frame_a,Frame_a,Frame_a)$, if the frame does not have alpha channel, $Frame_a = 1$. \\
 \hline
 
 \raisebox{\heightof{T}}[0pt][0pt]{\index{ONE\_MINUS\_DST\_ALPHA@{ONE\_MINUS\_DST\_ALPHA}!gpu.hpp@{gpu.hpp}}\index{gpu.hpp@{gpu.hpp}!ONE\_MINUS\_DST\_ALPHA@{ONE\_MINUS\_DST\_ALPHA}}}\Hypertarget{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36fa9760c2ee1a1ebfbfefe5e406c00fed0b}\label{solutionInterface_2src_2solutionInterface_2gpu_8hpp_a2e303f6844bc1be10709c24efb4ad36fa9760c2ee1a1ebfbfefe5e406c00fed0b} 
-ONE\+\_\+\+MINUS\+\_\+\+DST\+\_\+\+ALPHA&factor is $ (1,1,1,1) - (Frame_a,Frame_a,Frame_a,Frame_a)$ \\
+ONE\+\_\+\+MINUS\+\_\+\+DST\+\_\+\+ALPHA&factor is $ (1,1,1,1) - (Frame_a,Frame_a,Frame_a,Frame_a)$, if the frame does not have alpha channel, $Frame_a = 1$ \\
 \hline
 
 \end{DoxyEnumFields}

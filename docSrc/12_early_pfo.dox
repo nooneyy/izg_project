@@ -34,7 +34,7 @@ Mezi stencilové funkce patří hodnoty z enumu \ref StencilFunc
 - StencilFunc::GEQUAL -- projde pokud je hodnota ve stencilovém buferu >= než StencilSettings::refValue
 - StencilFunc::EQUAL -- projde pokud je hodnota ve stencilovém buferu == než StencilSettings::refValue
 - StencilFunc::NOTEQUAL -- projde pokud je hodnota ve stencilovém buferu != než StencilSettings::refValue
-- StencilFunc::NEVER -- vždy projde
+- StencilFunc::ALWAYS -- vždy projde
 
 \subsection pfo_early_stencil_test_op Stencilová operace
 

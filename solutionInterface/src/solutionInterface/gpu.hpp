@@ -237,7 +237,7 @@ struct VertexAttrib{
 struct VertexArray{
   VertexAttrib vertexAttrib[maxAttribs]                 ; ///< settings for vertex attributes
   int32_t      indexBufferID            = -1            ; ///< id of index buffer, if less than zero, there is no indexing
-  uint64_t     indexOffset              = 0             ; ///< offset of indices
+  uint64_t     indexOffset              = 0             ; ///< offset of indices in bytes
   IndexType    indexType                = IndexType::U32; ///< type of indices
 };
 //! [VertexArray]
@@ -386,6 +386,7 @@ struct StencilSettings{
  *
  * Source color, \f$ Frag=(Frag_r,Frag_g,Frag_b,Frag_a), \f$ is the color of fragment produced by fragment shader.
  * Destination color, \f$ Frame=(Frame_r,Frame_g,Frame_b,Frame_a)\f$, is the color stored in framebuffer.
+ * If the framebuffer has less channels, default values of each component is RGBA = (0,0,0,1).
  *
  * It follows the <a href="https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBlendFunc.xhtml">OpenGL</a> specification.
  */
@@ -395,12 +396,12 @@ enum class BlendFunc{
    ONE                , ///< factor is \f$ (1,1,1,1) \f$
    SRC_COLOR          , ///< factor is \f$ (Frag_r,Frag_g,Frag_b,Frag_a) \f$
    ONE_MINUS_SRC_COLOR, ///< factor is \f$ (1,1,1,1) - (Frag_r,Frag_g,Frag_b,Frag_a) \f$
-   DST_COLOR          , ///< factor is \f$ (Frame_r,Frame_g,Frame_b,Frame_a)\f$
-   ONE_MINUS_DST_COLOR, ///< factor is \f$ (1,1,1,1) - (Frame_r,Frame_g,Frame_b,Frame_a)\f$
+   DST_COLOR          , ///< factor is \f$ (Frame_r,Frame_g,Frame_b,Frame_a)\f$, if frame has less than 4 channels, the default values of Frame is (0,0,0,1)
+   ONE_MINUS_DST_COLOR, ///< factor is \f$ (1,1,1,1) - (Frame_r,Frame_g,Frame_b,Frame_a)\f$, if frame has less than 4 channel, the default values of Frame is (0,0,0,1)
    SRC_ALPHA          , ///< factor is \f$ (Frag_a,Frag_a,Frag_a,Frag_a)\f$
    ONE_MINUS_SRC_ALPHA, ///< factor is \f$ (1,1,1,1) - (Frag_a,Frag_a,Frag_a,Frag_a)\f$
-   DST_ALPHA          , ///< factor is \f$ (Frame_a,Frame_a,Frame_a,Frame_a)\f$
-   ONE_MINUS_DST_ALPHA, ///< factor is \f$ (1,1,1,1) - (Frame_a,Frame_a,Frame_a,Frame_a)\f$
+   DST_ALPHA          , ///< factor is \f$ (Frame_a,Frame_a,Frame_a,Frame_a)\f$, if the frame does not have alpha channel, \f$Frame_a = 1\f$.
+   ONE_MINUS_DST_ALPHA, ///< factor is \f$ (1,1,1,1) - (Frame_a,Frame_a,Frame_a,Frame_a)\f$, if the frame does not have alpha channel, \f$Frame_a = 1\f$
 };
 //! [BlendFunc]
 
