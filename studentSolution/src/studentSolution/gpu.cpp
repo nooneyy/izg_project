@@ -19,9 +19,14 @@ void process_user_command(GPUMemory &mem, UserCommand cmd);
 void process_draw(GPUMemory &mem, DrawCommand cmd);
 void process_subcommand(GPUMemory &mem, SubCommand cmd);
 
-typedef struct {
+struct Primitive {
   std::array<OutVertex, 3> vertices;
-} Primitive;
+};
+
+struct ClippedPrimitives {
+  std::array<Primitive, 2> primitives;
+  uint32_t count = 0;
+};
 
 //! [student_GPU_run]
 void student_GPU_run(GPUMemory &mem, CommandBuffer const &cb) {
@@ -253,6 +258,101 @@ Primitive primitive_assembly(GPUMemory &mem, uint32_t vertex_idx,
   return primitive;
 }
 
+float near_plane_distance(OutVertex const &vertex) {
+  return vertex.gl_Position.z + vertex.gl_Position.w;
+}
+
+OutVertex interpolate_vertex_attribs(OutVertex const &vertex_a,
+                                     OutVertex const &vertex_b, float t,
+                                     AttribType const (&vs2fs)[maxAttribs]) {
+  OutVertex result = {};
+  result.gl_Position =
+      vertex_a.gl_Position + t * (vertex_b.gl_Position - vertex_a.gl_Position);
+
+  for (unsigned attr_idx = 0; attr_idx < maxAttribs; attr_idx++) {
+    switch (vs2fs[attr_idx]) {
+    case AttribType::FLOAT:
+      result.attributes[attr_idx].v1 = vertex_a.attributes[attr_idx].v1 +
+                                       t * (vertex_b.attributes[attr_idx].v1 -
+                                            vertex_a.attributes[attr_idx].v1);
+      break;
+    case AttribType::VEC2:
+      result.attributes[attr_idx].v2 = vertex_a.attributes[attr_idx].v2 +
+                                       t * (vertex_b.attributes[attr_idx].v2 -
+                                            vertex_a.attributes[attr_idx].v2);
+      break;
+    case AttribType::VEC3:
+      result.attributes[attr_idx].v3 = vertex_a.attributes[attr_idx].v3 +
+                                       t * (vertex_b.attributes[attr_idx].v3 -
+                                            vertex_a.attributes[attr_idx].v3);
+      break;
+    case AttribType::VEC4:
+      result.attributes[attr_idx].v4 = vertex_a.attributes[attr_idx].v4 +
+                                       t * (vertex_b.attributes[attr_idx].v4 -
+                                            vertex_a.attributes[attr_idx].v4);
+      break;
+    case AttribType::EMPTY:
+    case AttribType::UINT:
+    case AttribType::UVEC2:
+    case AttribType::UVEC3:
+    case AttribType::UVEC4:
+    default:
+      break;
+    }
+  }
+
+  return result;
+}
+
+OutVertex make_intersection_vertex(OutVertex const &vertex_a,
+                                   OutVertex const &vertex_b,
+                                   AttribType const (&vs2fs)[maxAttribs]) {
+  const auto &a_pos = vertex_a.gl_Position;
+  const auto &b_pos = vertex_b.gl_Position;
+  const auto t = (-a_pos.w - a_pos.z) / (b_pos.w - a_pos.w + b_pos.z - a_pos.z);
+  return interpolate_vertex_attribs(vertex_a, vertex_b, t, vs2fs);
+}
+
+ClippedPrimitives near_plane_clipping(GPUMemory &mem, Primitive const &prim) {
+  ClippedPrimitives clipped = {};
+  const auto &vs2fs = mem.programs[mem.activatedProgram].vs2fs;
+  std::array<OutVertex, 4> new_vertices;
+  uint32_t vertex_count = 0;
+
+  for (unsigned vertex_idx = 0; vertex_idx < 3; vertex_idx++) {
+    const auto &vertex_a = prim.vertices[vertex_idx];
+    const auto &vertex_b = prim.vertices[(vertex_idx + 2) % 3];
+    const auto a_inside = near_plane_distance(vertex_a) > 0;
+    const auto b_inside = near_plane_distance(vertex_b) > 0;
+
+    if (a_inside && !b_inside)
+      new_vertices[vertex_count++] =
+          make_intersection_vertex(vertex_b, vertex_a, vs2fs);
+
+    if (a_inside)
+      new_vertices[vertex_count++] = vertex_a;
+
+    if (!a_inside && b_inside)
+      new_vertices[vertex_count++] =
+          make_intersection_vertex(vertex_b, vertex_a, vs2fs);
+  }
+
+  if (vertex_count < 3)
+    return clipped;
+
+  clipped.primitives[0].vertices = {new_vertices[0], new_vertices[1],
+                                    new_vertices[2]};
+  clipped.count = 1;
+
+  if (vertex_count == 4) {
+    clipped.primitives[1].vertices = {new_vertices[0], new_vertices[2],
+                                      new_vertices[3]};
+    clipped.count = 2;
+  }
+
+  return clipped;
+}
+
 void perspective_div(Primitive &prim) {
   for (auto &vert : prim.vertices) {
     const auto w = vert.gl_Position.w;
@@ -270,7 +370,9 @@ void viewport_transform(GPUMemory &mem, Primitive &prim) {
 
   for (auto &vert : prim.vertices) {
     vert.gl_Position.x = (vert.gl_Position.x * 0.5 + 0.5) * width;
-    vert.gl_Position.y = (vert.gl_Position.y * 0.5 + 0.5) * height;
+    float y = vert.gl_Position.y * 0.5 + 0.5;
+    vert.gl_Position.y =
+        (selected_framebuffer.yReversed ? (1 - y) : y) * height;
   }
 }
 
@@ -283,9 +385,9 @@ float edge_function(glm::vec4 const &from, glm::vec4 const &to,
 void interpolate_frag_attribs(InFragment &frag,
                               const AttribType (&vs2fs)[maxAttribs],
                               const glm::vec3 &lambda, Primitive &prim) {
-  auto v0 = prim.vertices[0];
-  auto v1 = prim.vertices[1];
-  auto v2 = prim.vertices[2];
+  auto &v0 = prim.vertices[0];
+  auto &v1 = prim.vertices[1];
+  auto &v2 = prim.vertices[2];
 
   auto persp_lambda_x = lambda.x / v0.gl_Position.w;
   auto persp_lambda_y = lambda.y / v1.gl_Position.w;
@@ -680,9 +782,15 @@ void process_draw(GPUMemory &mem, DrawCommand cmd) {
                             .gl_DrawID = mem.gl_DrawID};
   for (uint32_t vertex_idx = 0; vertex_idx < cmd.nofVertices; vertex_idx += 3) {
     Primitive primitive = primitive_assembly(mem, vertex_idx, shader);
-    perspective_div(primitive);
-    viewport_transform(mem, primitive);
-    rasterize(mem, primitive);
+    auto clipped = near_plane_clipping(mem, primitive);
+
+    for (uint32_t primitive_idx = 0; primitive_idx < clipped.count;
+         primitive_idx++) {
+      auto &clipped_primitive = clipped.primitives[primitive_idx];
+      perspective_div(clipped_primitive);
+      viewport_transform(mem, clipped_primitive);
+      rasterize(mem, clipped_primitive);
+    }
   }
   mem.gl_DrawID++;
 }
