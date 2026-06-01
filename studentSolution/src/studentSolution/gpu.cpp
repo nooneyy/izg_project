@@ -99,29 +99,30 @@ void student_GPU_run(GPUMemory &mem, CommandBuffer const &cb) {
 void process_clear_color(GPUMemory &mem, ClearColorCommand cmd) {
   const auto &selected_framebuffer = mem.framebuffers[mem.activatedFramebuffer];
 
-  const auto &color_image = selected_framebuffer.color;
-  const auto image_data = static_cast<uint8_t *>(color_image.data);
+  auto &color_image = mem.framebuffers[mem.activatedFramebuffer].color;
+  if (!color_image.data)
+    return;
 
-  if (image_data) {
-    const auto value_count = selected_framebuffer.width *
-                             selected_framebuffer.height *
-                             color_image.bytesPerPixel;
-    const auto channel_count = color_image.channels;
-    if (color_image.format == Image::U8) {
-      const uint8_t transformed_values[] = {
-          static_cast<uint8_t>(cmd.value.x * UINT8_MAX),
-          static_cast<uint8_t>(cmd.value.y * UINT8_MAX),
-          static_cast<uint8_t>(cmd.value.z * UINT8_MAX),
-          static_cast<uint8_t>(cmd.value.w * UINT8_MAX)};
-      for (unsigned idx = 0; idx < value_count; idx++) {
-        image_data[idx] = transformed_values[idx % channel_count];
-      }
-    } else {
-      for (unsigned idx = 0; idx < value_count; idx++) {
-        ((float *)image_data)[idx] = cmd.value[idx % channel_count];
+  const uint8_t transformed_values[] = {
+      static_cast<uint8_t>(cmd.value.x * UINT8_MAX),
+      static_cast<uint8_t>(cmd.value.y * UINT8_MAX),
+      static_cast<uint8_t>(cmd.value.z * UINT8_MAX),
+      static_cast<uint8_t>(cmd.value.w * UINT8_MAX)};
+
+  for (uint32_t y = 0; y < selected_framebuffer.height; y++) {
+    for (uint32_t x = 0; x < selected_framebuffer.width; x++) {
+      auto *value = static_cast<uint8_t *>(getPixel(color_image, x, y));
+
+      for (uint32_t channel = 0; channel < color_image.channels; channel++) {
+        const auto rgba = color_image.channelTypes[channel];
+        if (color_image.format == Image::U8) {
+          value[channel] = transformed_values[rgba];
+        } else {
+          reinterpret_cast<float *>(value)[channel] = cmd.value[rgba];
+        }
       }
     }
-  };
+  }
 }
 
 void process_clear_depth(GPUMemory &mem, ClearDepthCommand cmd) {
@@ -546,19 +547,17 @@ bool depth_test(GPUMemory &mem, InFragment &frag, bool front_facing) {
 
 glm::vec4 read_color_buffer(Image &color_buffer, uint32_t x, uint32_t y) {
   glm::vec4 color = {};
-  auto *pixel = static_cast<uint8_t *>(getPixel(color_buffer, x, y));
+  auto *value = static_cast<uint8_t *>(getPixel(color_buffer, x, y));
 
   if (color_buffer.format == Image::U8) {
     for (unsigned channel = 0; channel < color_buffer.channels; channel++) {
-      const auto component = color_buffer.channelTypes[channel];
-      color[component] = *pixel / static_cast<float>(UINT8_MAX);
-      pixel += sizeof(uint8_t);
+      const auto rgba = color_buffer.channelTypes[channel];
+      color[rgba] = value[channel] / static_cast<float>(UINT8_MAX);
     }
   } else {
     for (unsigned channel = 0; channel < color_buffer.channels; channel++) {
-      const auto component = color_buffer.channelTypes[channel];
-      color[component] = *reinterpret_cast<float *>(pixel);
-      pixel += sizeof(float);
+      const auto rgba = color_buffer.channelTypes[channel];
+      color[rgba] = reinterpret_cast<float *>(value)[channel];
     }
   }
 
@@ -573,11 +572,11 @@ void write_color_buffer(Image &color_buffer, uint32_t x, uint32_t y,
   auto *value = static_cast<uint8_t *>(getPixel(color_buffer, x, y));
 
   for (unsigned channel = 0; channel < color_buffer.channels; channel++) {
-    const auto component = color_buffer.channelTypes[channel];
+    const auto rgba = color_buffer.channelTypes[channel];
     if (color_buffer.format == Image::U8) {
-      value[channel] = std::clamp<float>(color[component], 0, 1) * UINT8_MAX;
+      value[channel] = std::clamp<float>(color[rgba], 0, 1) * UINT8_MAX;
     } else {
-      reinterpret_cast<float *>(value)[channel] = color[component];
+      reinterpret_cast<float *>(value)[channel] = color[rgba];
     }
   }
 }
