@@ -714,11 +714,13 @@ void rasterize(GPUMemory &mem, Primitive &prim) {
   const auto edge2_step_y = v0_pos.x - v1_pos.x;
 
   const auto area = edge_function(v0_pos, v1_pos, glm::vec2(v2_pos));
+
   if (area == 0.0f)
     return;
 
   const auto front_facing =
-      (area < 0.0f) == mem.backfaceCulling.frontFaceIsCounterClockWise;
+      ((selected_framebuffer.yReversed ? -area : area) < 0.0f) ==
+      mem.backfaceCulling.frontFaceIsCounterClockWise;
 
   if (mem.backfaceCulling.enabled && !front_facing)
     return;
